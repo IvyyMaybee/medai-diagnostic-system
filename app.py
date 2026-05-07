@@ -17,6 +17,9 @@ from tensorflow.keras.layers import Layer
 from fusion import normalize, get_top_prediction, get_top_k
 from gradcam import get_gradcam_heatmap, overlay_heatmap
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # app = Flask(__name__)
 app = Flask(
     __name__,
