@@ -76,33 +76,41 @@ class AttentionLayer(Layer):
 
 # ── Load Models ───────────────────────────────────────────────────────────
 
-nlp_model = load_model(
-    "model/disease_prediction_model.h5",
-    custom_objects={"AttentionLayer": AttentionLayer},
-)
-
-with open("model/preprocessing.pkl", "rb") as f:
-    _data = pickle.load(f)
-
-tokenizer = _data["tokenizer"]
-label_encoder = _data["label_encoder"]
-
-image_model = load_model("model/skin_cancer_cnn.h5")
-
-# Force model build for Grad-CAM
-dummy_input = tf.zeros((1, 128, 128, 3))
-_ = image_model(dummy_input, training=False)
-
-# Warm-up pass to avoid first-inference latency
-image_model.predict(np.zeros((1, 128, 128, 3)))
-
-# Auto-detect last Conv2D layer for Grad-CAM
+# ── Model Loading (graceful — handles missing/LFS-pointer model files) ─────
+nlp_model = None
+tokenizer = None
+label_encoder = None
+image_model = None
 LAST_CONV_LAYER = None
-for layer in reversed(image_model.layers):
-    if "conv" in layer.name.lower() and "pool" not in layer.name.lower():
-        LAST_CONV_LAYER = layer.name
-        break
-print(f"[INFO] GradCAM layer: {LAST_CONV_LAYER}")
+
+try:
+    nlp_model = load_model(
+        "model/disease_prediction_model.h5",
+        custom_objects={"AttentionLayer": AttentionLayer},
+    )
+    with open("model/preprocessing.pkl", "rb") as f:
+        _data = pickle.load(f)
+    tokenizer = _data["tokenizer"]
+    label_encoder = _data["label_encoder"]
+    print("[INFO] NLP model loaded successfully.")
+except Exception as e:
+    print(f"[WARN] NLP model could not be loaded: {e}")
+
+try:
+    image_model = load_model("model/skin_cancer_cnn.h5")
+    # Force model build for Grad-CAM
+    dummy_input = tf.zeros((1, 128, 128, 3))
+    _ = image_model(dummy_input, training=False)
+    # Warm-up pass to avoid first-inference latency
+    image_model.predict(np.zeros((1, 128, 128, 3)))
+    # Auto-detect last Conv2D layer for Grad-CAM
+    for layer in reversed(image_model.layers):
+        if "conv" in layer.name.lower() and "pool" not in layer.name.lower():
+            LAST_CONV_LAYER = layer.name
+            break
+    print(f"[INFO] Image model loaded. GradCAM layer: {LAST_CONV_LAYER}")
+except Exception as e:
+    print(f"[WARN] Image model could not be loaded: {e}")
 
 
 # ── Text Processing ───────────────────────────────────────────────────────
@@ -115,6 +123,8 @@ def clean_text(text: str) -> str:
 
 
 def predict_symptoms(text: str) -> dict:
+    if nlp_model is None or tokenizer is None or label_encoder is None:
+        raise RuntimeError("NLP model is not available. Model files may not be loaded yet.")
     text = clean_text(text)
     seq = tokenizer.texts_to_sequences([text])
     padded = pad_sequences(seq, maxlen=150)
@@ -127,6 +137,8 @@ def predict_symptoms(text: str) -> dict:
 
 # ── Image Processing ──────────────────────────────────────────────────────
 def predict_image(img_array: np.ndarray) -> dict:
+    if image_model is None:
+        raise RuntimeError("Image model is not available. Model files may not be loaded yet.")
     prediction = image_model.predict(img_array)[0][0]
 
     print("Raw prediction:", prediction)
